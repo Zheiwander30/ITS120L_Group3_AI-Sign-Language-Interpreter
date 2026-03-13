@@ -1,17 +1,18 @@
-from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+import os
 import cv2
 import numpy as np
 import mediapipe as mp
 import tensorflow as tf
 import pickle
 from pathlib import Path
+from fastapi import FastAPI, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from database import engine, SessionLocal
 import models
 from routers import users, sessions, payments, autocomplete, vocabulary
-
 from dotenv import load_dotenv
+
 load_dotenv() # Load variables immediately
 
 # 1. Setup Database
@@ -19,7 +20,7 @@ models.Base.metadata.create_all(bind=engine)
 
 # 2. App & CORS
 app = FastAPI(title="KamAI API")
-import os
+
 _ALLOWED_ORIGINS = [
     "http://localhost:5173",   # Vite dev server
     "http://localhost:4173",   # Vite preview
@@ -45,10 +46,22 @@ app.include_router(payments.router)
 app.include_router(autocomplete.router)
 app.include_router(vocabulary.router)
 
-# 5. Load AI Model & Landmark Tools
-# Ensure these paths match your folder structure
-model = tf.keras.models.load_model("models/asl_landmark_model.h5")
-with open("models/label_encoder.pkl", "rb") as f:
+# 5. Load AI Model & Landmark Tools (PATH-PROOF VERSION)
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "models" / "asl_landmark_model.h5"
+ENCODER_PATH = BASE_DIR / "models" / "label_encoder.pkl"
+
+# Convert to string for TensorFlow/Pickle compatibility
+model_path_str = str(MODEL_PATH)
+encoder_path_str = str(ENCODER_PATH)
+
+print(f"DEBUG: Looking for model at {model_path_str}")
+
+if not MODEL_PATH.exists():
+    raise FileNotFoundError(f"Model file not found at {model_path_str}. Check your GitHub repo structure!")
+
+model = tf.keras.models.load_model(model_path_str)
+with open(encoder_path_str, "rb") as f:
     label_encoder = pickle.load(f)
 
 mp_hands = mp.solutions.hands
@@ -95,43 +108,30 @@ async def predict(file: UploadFile = File(...)):
         predicted_idx = np.argmax(prediction)
         predicted_letter = label_encoder.inverse_transform([predicted_idx])[0]
         
-        # ... rest of your database logging logic ...
         return {"letter": str(predicted_letter), "confidence": round(confidence, 2)}
 
     except Exception as e:
         return {"letter": "None", "details": str(e)}
 
 # ── Migration: fix vocab_words.tier ENUM column ───────────────────────────────
-# MySQL stores ENUM values in the column definition itself. If the table was
-# created with ('free','professional','enterprise') we must ALTER the column
-# before any ORM query touches it, otherwise SQLAlchemy raises LookupError.
-#
-# Steps:
-#  1. ALTER column to VARCHAR(32) so any string is valid
-#  2. UPDATE old string values to new ones
-#  3. ALTER column back to ENUM('p1','p2','p3')
 def _migrate_vocab_tiers():
     from sqlalchemy import text, inspect
     try:
         with engine.begin() as conn:
-            # Only run if the table exists
             inspector = inspect(engine)
             if "vocab_words" not in inspector.get_table_names():
                 return
 
-            # Step 1 — widen to VARCHAR so we can write any value
             conn.execute(text(
                 "ALTER TABLE vocab_words MODIFY COLUMN tier VARCHAR(32) NOT NULL DEFAULT 'p3'"
             ))
 
-            # Step 2 — remap old values
             OLD_TO_NEW = {"free": "p3", "professional": "p2", "enterprise": "p1"}
             for old_val, new_val in OLD_TO_NEW.items():
                 conn.execute(text(
                     "UPDATE vocab_words SET tier = :new WHERE tier = :old"
                 ), {"new": new_val, "old": old_val})
 
-            # Step 3 — lock back to the correct ENUM
             conn.execute(text(
                 "ALTER TABLE vocab_words MODIFY COLUMN tier ENUM('p1','p2','p3') NOT NULL DEFAULT 'p3'"
             ))
