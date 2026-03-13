@@ -14,7 +14,6 @@ Thumbs.db
 
 # Backend
 backend/venv/
-backend/models/
 backend/data/
 
 # Firebase service account key -- !!! DO NOT PUSH THIS FILE TO GITHUB !!!
