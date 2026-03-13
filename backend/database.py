@@ -19,5 +19,15 @@ engine = create_engine(
     pool_recycle=3600,
 )
 
+# ... (your existing code above)
+
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
+
+# ADD THIS PART:
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
