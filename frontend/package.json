@@ -17,7 +17,7 @@
     "firebase": "^10.8.0",
     "@mediapipe/hands": "^0.4.1646424915",
     "@mediapipe/drawing_utils": "^0.3.1620248257",
-    "lucide-react": "^0.344.0"
+    "lucide-react": "latest"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
