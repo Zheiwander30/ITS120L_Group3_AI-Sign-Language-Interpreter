@@ -5,7 +5,7 @@
  */
 import { auth } from '../firebase'
 
-const BASE = import.meta.env.VITE_API_URL ?? 'https://kamai.up.railway.app/'
+const BASE = import.meta.env.VITE_API_URL ?? 'https://kamai.up.railway.app'
 
 async function getToken() {
   const user = auth.currentUser
