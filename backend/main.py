@@ -36,6 +36,7 @@ app.add_middleware(
 )
 
 # 3. Static Files
+# Ensures uploads folder exists inside the backend directory
 Path("uploads/avatars").mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
@@ -47,6 +48,7 @@ app.include_router(autocomplete.router)
 app.include_router(vocabulary.router)
 
 # 5. Load AI Model & Landmark Tools (PATH-PROOF VERSION)
+# This finds the directory where main.py actually sits (/app/backend)
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "asl_landmark_model.h5"
 ENCODER_PATH = BASE_DIR / "models" / "label_encoder.pkl"
@@ -55,10 +57,17 @@ ENCODER_PATH = BASE_DIR / "models" / "label_encoder.pkl"
 model_path_str = str(MODEL_PATH)
 encoder_path_str = str(ENCODER_PATH)
 
-print(f"DEBUG: Looking for model at {model_path_str}")
+print(f"--- SERVER STARTUP DEBUG ---")
+print(f"BASE_DIR identified as: {BASE_DIR}")
+print(f"Looking for model at: {model_path_str}")
 
+# Check if file exists before loading to give a clear error in logs
 if not MODEL_PATH.exists():
-    raise FileNotFoundError(f"Model file not found at {model_path_str}. Check your GitHub repo structure!")
+    print(f"ERROR: Model file not found! List of files in {BASE_DIR}: {os.listdir(BASE_DIR)}")
+    # If this fails, the file didn't make it to GitHub or was ignored
+    raise FileNotFoundError(f"Missing model file at {model_path_str}")
+else:
+    print(f"SUCCESS: Model file found. Proceeding to load...")
 
 model = tf.keras.models.load_model(model_path_str)
 with open(encoder_path_str, "rb") as f:
@@ -71,7 +80,7 @@ hands = mp_hands.Hands(static_image_mode=True, max_num_hands=1, min_detection_co
 def root():
     return {"status": "KamAI API is running with Landmark AI"}
 
-# Add this at the top of your predict route
+# Confidence gate for AI predictions
 CONFIDENCE_THRESHOLD = 0.75 
 
 @app.post("/predict/")
@@ -87,20 +96,18 @@ async def predict(file: UploadFile = File(...)):
         if not results.multi_hand_landmarks:
             return {"letter": "None", "confidence": 0.0}
 
-        # --- UPDATED NORMALIZATION LOGIC ---
+        # --- NORMALIZATION LOGIC ---
         hand_landmarks = results.multi_hand_landmarks[0]
         wrist = hand_landmarks.landmark[0]
         
         landmark_list = []
         for lm in hand_landmarks.landmark:
-            # Subtract wrist to keep input format identical to training data!
+            # Subtract wrist to keep input format identical to training data
             landmark_list.extend([lm.x - wrist.x, lm.y - wrist.y, lm.z - wrist.z])
-        # -----------------------------------
         
         input_data = np.array([landmark_list], dtype=np.float32)
         prediction = model.predict(input_data, verbose=0)
         
-        # Now the confidence gate will work correctly
         confidence = float(np.max(prediction))
         if confidence < CONFIDENCE_THRESHOLD:
             return {"letter": "None", "confidence": confidence}
